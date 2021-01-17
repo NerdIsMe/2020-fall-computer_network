@@ -8,12 +8,20 @@
 #include <pthread.h>
 #include <unistd.h>
 
+// phase 2 的 threadpool
 #include <assert.h>
 #include "./threadpool.h"
 #define THREAD 3
 #define QUEUE  256
 #define MAX_CLI  50
 
+// phase 3 的 library & global variable
+#include <openssl/crypto.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#define RSA_SERVER_CERT     "server.crt"
+#define RSA_SERVER_KEY      "server.key"
+// --------------------------
 
 const int MAX_LENGTH = 100;
 int sockfd; // server socket
@@ -189,6 +197,16 @@ void Connection(void *client_sfd) // 與 client 連接成功後
 
 int main(int argc, char *argv[])
 {
+    // phase 3 加密連線
+    char m[] = "TX#A#100#B", cypher[MAX_LENGTH];
+    FILE *p_key_file = fopen(RSA_SERVER_KEY, "r");
+    RSA *rsa_private = PEM_read_RSAPrivateKey(p_key_file, 0, 0, 0);
+    // 產生密文
+    //int flen = (strlen(m)+1) * sizeof()
+    int do_encrpt = RSA_private_encrypt(sizeof(m), m, cypher, rsa_private, RSA_PKCS1_PADDING);
+    if(do_encrpt == -1) //密文生成失敗
+        ERR_print_errors_fp(stderr);
+    // --------------------------------------------------------
     // allocate memory to save user name and status
     //user_name = calloc(MAX_LENGTH, sizeof(char[20]));
     user_port = calloc(MAX_LENGTH, sizeof(int));
