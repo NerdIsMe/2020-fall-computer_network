@@ -19,8 +19,15 @@
 #include <openssl/crypto.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-#define RSA_SERVER_CERT     "server.crt"
-#define RSA_SERVER_KEY      "server.key"
+#define RSA_SERVER_CERT     "key_cert/server.crt"
+#define RSA_SERVER_KEY      "key_cert/server.key"
+#define CA_LIST    "key_cert/CA_list.crt"
+#define MAX256 256
+
+SSL_CTX         *ctx;
+//SSL             *ssl;
+const SSL_METHOD      *meth;
+X509            *client_cert = NULL;
 // --------------------------
 
 const int MAX_LENGTH = 100;
@@ -111,19 +118,34 @@ void Connection(void *client_sfd) // 與 client 連接成功後
 {
     //int client_sockfd = (intptr_t) client_sfd;
     struct client_information client_info = *((struct client_information *)client_sfd);
-    char mesg_r[MAX_LENGTH];
-    //client_info.login_status = false;
-    send(client_info.socket, "Connection accepted!\n", MAX_LENGTH, 0); // 送出連線成功
+    char mesg_r[MAX256];
+    
+    /*phase 3 SSL*/
+    printf("1\n");
+    SSL *ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, client_info.socket);
+    printf("2\n");
+    /* Perform SSL Handshake on the SSL server */
+    int err = SSL_accept(ssl);
+    X509 *client_cert = SSL_get_peer_certificate(ssl);// get client cert
+    printf("3\n");
+    EVP_PKEY *client_public = X509_get_pubkey(client_cert);//get client public key
+    printf("4\n");
+    RSA *client_RSA = EVP_PKEY_get1_RSA(client_public);//RSA
+    /*----------------------------------------------------------------------------------------*/
+    printf("before sending accept message.\n");
+    SSL_write(ssl, "Connection accepted!\n", MAX_LENGTH); // 送出連線成功
+    printf("sent accept message.\n");
     // the user status
     client_info.user_index = -1;
     while(true)
     {
-        recv(client_info.socket, mesg_r, MAX_LENGTH, 0);
+        SSL_read(ssl, mesg_r, MAX256);
         printf("%s\n", mesg_r);
         // Exit
         if(strcmp(mesg_r, "Exit") == 0)
         {
-            send(client_info.socket, "Bye\n", MAX_LENGTH, 0);
+            SSL_write(ssl, "Bye\n", MAX_LENGTH);
             user_status[client_info.user_index] = false;
             num_of_users_online-=1;
             break; 
@@ -142,19 +164,19 @@ void Connection(void *client_sfd) // 與 client 連接成功後
             user_status[num_of_users] = false;
             strcpy(user_IP[num_of_users], client_info.IP_address);
             num_of_users += 1;
-            send(client_info.socket, "100 OK\n", MAX_LENGTH, 0);// 成功的話
+            SSL_write(ssl, "100 OK\n", MAX_LENGTH);// 成功的話
         }
 
         // List
         else if(strcmp(mesg_r, "List") == 0)
         {
             if(client_info.user_index == -1)
-                send(client_info.socket, "Login first!\n", MAX_LENGTH, 0);
+                SSL_write(ssl, "Login first!\n", MAX_LENGTH);
             else
             {
                 char *mesg_s = malloc((num_of_users_online+1) * 50);
                 mesg_s = List(client_info.user_index);
-                send(client_info.socket, mesg_s, strlen(mesg_s), 0);
+                SSL_write(ssl, mesg_s, strlen(mesg_s));
                 printf("%s", mesg_s);
             }
         }
@@ -167,7 +189,7 @@ void Connection(void *client_sfd) // 與 client 連接成功後
             if(strstr(mesg_r, "to you!") != NULL)
                 printf("receive client transactions: %s\n", mesg_r);
             else if(ptr == NULL)
-                send(client_info.socket, "Invalid instructions\n", MAX_LENGTH, 0);
+                SSL_write(ssl, "Invalid instructions\n", MAX_LENGTH);
             else
             {
                 ptr2 = ptr; ptr = strtok(NULL, delim);
@@ -183,7 +205,7 @@ void Connection(void *client_sfd) // 與 client 連接成功後
                         //  List
                         char *mesg_s = malloc((num_of_users_online+1) * 50);
                         mesg_s = List(client_info.user_index);
-                        send(client_info.socket, mesg_s, strlen(mesg_s), 0);
+                        SSL_write(ssl, mesg_s, strlen(mesg_s));
                         printf("%s", mesg_s);
                     }
                 }
@@ -193,20 +215,43 @@ void Connection(void *client_sfd) // 與 client 連接成功後
 
         memset(mesg_r, 0, MAX_LENGTH);
     }
+    close(client_info.socket);
+    SSL_shutdown(ssl);
 }
 
 int main(int argc, char *argv[])
 {
     // phase 3 加密連線
-    char m[] = "TX#A#100#B", cypher[MAX_LENGTH];
     FILE *p_key_file = fopen(RSA_SERVER_KEY, "r");
     RSA *rsa_private = PEM_read_RSAPrivateKey(p_key_file, 0, 0, 0);
-    // 產生密文
-    //int flen = (strlen(m)+1) * sizeof()
-    int do_encrpt = RSA_private_encrypt(sizeof(m), m, cypher, rsa_private, RSA_PKCS1_PADDING);
-    if(do_encrpt == -1) //密文生成失敗
+    SSL_library_init(); /* load encryption & hash algorithms for SSL */         	
+    SSL_load_error_strings(); /* load the error strings for good error reporting */
+    meth = SSLv23_method();
+    ctx = SSL_CTX_new(meth);
+
+    /* Load the client certificate into the SSL_CTX structure */
+    if (SSL_CTX_use_certificate_file(ctx, RSA_SERVER_CERT, SSL_FILETYPE_PEM) <= 0)
+    {
         ERR_print_errors_fp(stderr);
-    // --------------------------------------------------------
+        exit(1);
+    }
+
+    /* Load the private-key corresponding to the client certificate */
+    if (SSL_CTX_use_PrivateKey_file(ctx, RSA_SERVER_KEY, SSL_FILETYPE_PEM) <= 0)
+    {
+        ERR_print_errors_fp(stderr);
+        exit(1);
+    }
+
+    /* Check if the client certificate and private-key matches */
+    if (!SSL_CTX_check_private_key(ctx))
+    {
+        fprintf(stderr, "Private key does not match the certificate public key\n ");
+        exit(1);
+    }
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);// 要求 sender's certificate
+    SSL_CTX_load_verify_locations(ctx, CA_LIST, NULL);
+    /*--------------------------------------------------------------------------------*/
     // allocate memory to save user name and status
     //user_name = calloc(MAX_LENGTH, sizeof(char[20]));
     user_port = calloc(MAX_LENGTH, sizeof(int));
