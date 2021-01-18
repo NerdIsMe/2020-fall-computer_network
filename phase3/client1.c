@@ -108,7 +108,7 @@ void *Listen(void* tempt)
         //printf("6.3\n");
         sender_RSA = EVP_PKEY_get1_RSA(sender_public);//RSA
         //printf("6.31\n");
-        err = SSL_read(ssl, cypher_message, MAX256);
+        err = SSL_read(ssl_l, cypher_message, MAX256);
         //printf("6.2\n");
         RSA_public_decrypt(MAX256, cypher_message, plain_message, sender_RSA, RSA_PKCS1_PADDING);
         //printf("6.4\n");
@@ -192,6 +192,7 @@ void *SendToOtherClient(void* message)
         int flen = (strlen(message_to_c)+1) * sizeof(char);
         int do_encrpt = RSA_private_encrypt(flen, message_to_c, cypher, rsa_private, RSA_PKCS1_PADDING);
         printf("4.\n");
+        printf("cpher len = %lu\n", strlen(cypher));
         err = SSL_write(ssl_s, cypher, MAX256);
         /*--------------- SSL closure ---------------*/
         /* Shutdown this side (server) of the connection. */

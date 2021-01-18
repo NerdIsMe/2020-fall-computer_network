@@ -119,8 +119,8 @@ void *Listen(void* tempt)
         //--------------------------------------------------------------------------------------
         //printf("cypher message: %s\n", cypher_message);
         printf("Received message from other client: %s\n", plain_message);
-        send(sockfd, plain_message, MAX_LENGTH, 0);
-        //recv(sockfd, cypher_message, MAX_LENGTH, 0);
+        SSL_write(ssl, plain_message, MAX_LENGTH);
+        //SSL_read(ssl, cypher_message, MAX_LENGTH);
         memset(plain_message, 0, MAX256); memset(cypher_message, 0, MAX256);
 
     }
@@ -188,11 +188,11 @@ void *SendToOtherClient(void* message)
         SSL_set_fd(ssl_s, sockfd_s);
         /* Perform SSL Handshake on the receiver client */
         err = SSL_connect(ssl_s);
-        /* Send data to the SSL server */
-            // 產生密文
+        // 產生密文
         int flen = (strlen(message_to_c)+1) * sizeof(char);
         int do_encrpt = RSA_private_encrypt(flen, message_to_c, cypher, rsa_private, RSA_PKCS1_PADDING);
         printf("4.\n");
+        printf("cpher len = %lu\n", strlen(cypher));
         err = SSL_write(ssl_s, cypher, MAX256);
         /*--------------- SSL closure ---------------*/
         /* Shutdown this side (server) of the connection. */
@@ -206,7 +206,6 @@ void *SendToOtherClient(void* message)
         
     }
 }
-
 
 int main(int argc , char *argv[])
 {   
@@ -261,7 +260,12 @@ int main(int argc , char *argv[])
     if(err==-1){
         printf("Connection error to server");
     }
+    // phase3 SSL 交握
+    ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, sockfd);
+    SSL_connect(ssl);// handshake
 
+    /*--------------------------------------------------------------------------*/
     pthread_t thread_listen, thread_send_c; // 新的筆，for listen and for send
     pthread_attr_t attr;
     pthread_attr_init(&attr); // default setting
@@ -273,7 +277,7 @@ int main(int argc , char *argv[])
     char input_copy[MAX_LENGTH];
 
     // initial connection message
-    recv(sockfd, server_message, MAX_LENGTH, 0);
+    SSL_read(ssl, server_message, MAX_LENGTH);
     printf("%s", server_message);
     memset(server_message, 0, MAX_LENGTH);
 
@@ -299,15 +303,15 @@ int main(int argc , char *argv[])
                 info_to_c.sin_port = htons(atoi(port));
                 bind(sockfd_l,(struct sockaddr *)&info_to_c,sizeof(info_to_c));
                 pthread_create(&thread_listen, &attr, Listen, argv[1]); // 生出新的筆, for listening
-                send(sockfd, input, MAX_LENGTH, 0);// login 給 server;
-                recv(sockfd, server_message, MAX_LENGTH, 0);// 接收 server 回傳的 List
+                SSL_write(ssl, input, MAX_LENGTH);// login 給 server;
+                SSL_read(ssl, server_message, MAX_LENGTH);// 接收 server 回傳的 List
                 printf("%s", server_message);
             }
             else // transaction
             {
                 //port 是 amount of cash, ptr_ 是對方的account
-                send(sockfd, "List", MAX_LENGTH, 0);
-                recv(sockfd, server_message, MAX_LENGTH, 0);
+                SSL_write(ssl, "List", MAX_LENGTH);
+                SSL_read(ssl, server_message, MAX_LENGTH);
                 char *tptr, *to_IPaddr = NULL, *to_port, *to_user_name; char crlf[] = "\n";
                 tptr = strtok(server_message, crlf); //account balance
                 tptr = strtok(NULL, crlf); // # of users online
@@ -351,11 +355,11 @@ int main(int argc , char *argv[])
         //     //printf("thread done\n");
             
         // }
-        else // send request and recv from server
+        else // send request and SSL_read sslerver
         {
-            //printf("input: %s", input);
-            send(sockfd, input, MAX_LENGTH, 0);
-            recv(sockfd, server_message, MAX_LENGTH, 0);
+            printf("input: %s", input);
+            SSL_write(ssl, input, MAX_LENGTH);
+            SSL_read(ssl, server_message, MAX_LENGTH);
             printf("%s----------\n", server_message);
             if (strcmp(server_message, "Bye\n") == 0)
             {   stop_program = true;
