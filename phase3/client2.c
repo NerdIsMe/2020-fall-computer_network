@@ -134,22 +134,21 @@ void *Listen(void* tempt)
                 //printf("half2: %c\n", half2_cypher[i-MAX256/2]);
             }
         }
-        //memcpy(half1_cypher, cypher_message, MAX256/2); memcpy(half2_cypher, cypher_message + MAX256/2, MAX256/2);
         //printf("half1_cypher = %s\n", first_cypher); printf("half2_cypher = %s\n", second_cypher);
         //RSA_private_encrypt(MAX256, half1_cypher, first_cypher, rsa_private, RSA_PKCS1_PADDING);
-        //RSA_private_encrypt(MAX256, half2_cypher, second_cypher, rsa_private, RSA_PKCS1_PADDING);
-        int flen = (strlen(plain_message)+1) * sizeof(char);
-        RSA_private_encrypt(flen, plain_message, first_cypher, rsa_private, RSA_PKCS1_PADDING);
-        RSA_private_encrypt(flen, plain_message, second_cypher, rsa_private, RSA_PKCS1_PADDING);
+        //RSA_private_encrypt(MAX256, half1_cypher, second_cypher, rsa_private, RSA_PKCS1_PADDING);
+        int flen = (128+1) * sizeof(char);
+        RSA_private_encrypt(flen, half1_cypher, first_cypher, rsa_private, RSA_PKCS1_PADDING);
+        RSA_private_encrypt(flen, half2_cypher, second_cypher, rsa_private, RSA_PKCS1_PADDING);
         //printf("f_cypher = %s\n", first_cypher); printf("s_cypher = %s\n", second_cypher);
-        strcpy(full_message, plain_message); strcat(full_message, "&");
+        //strcpy(full_message, plain_message); strcat(full_message, "&");
         printf("9\n");
-        strcat(full_message, first_cypher); strcat(full_message, second_cypher);
+        //strcat(full_message, first_cypher); strcat(full_message, second_cypher);
         //printf("full message = %s\n", full_message);
 
         SSL_write(ssl, plain_message, MAX256);
         SSL_write(ssl, first_cypher, MAX256);
-        SSL_write(ssl, plain_message, MAX256);
+        SSL_write(ssl, second_cypher, MAX256);
         //SSL_read(ssl, cypher_message, MAX_LENGTH);
         memset(plain_message, 0, MAX256); memset(cypher_message, 0, MAX256);
 
@@ -209,7 +208,7 @@ void *SendToOtherClient(void* message)
         close(sockfd_s);
     }
     else{
-        printf("3.\n");
+        //printf("3.\n");
         //------------------------------------------------------------------------------------------------
         // SSL 傳輸
         // 用自己的private加密
@@ -221,7 +220,7 @@ void *SendToOtherClient(void* message)
         // 產生密文
         int flen = (strlen(message_to_c)+1) * sizeof(char);
         int do_encrpt = RSA_private_encrypt(flen, message_to_c, cypher, rsa_private, RSA_PKCS1_PADDING);
-        printf("4.\n");
+        //printf("4.\n");
         err = SSL_write(ssl_s, cypher, MAX256);
         /*--------------- SSL closure ---------------*/
         /* Shutdown this side (server) of the connection. */
@@ -229,7 +228,7 @@ void *SendToOtherClient(void* message)
     
         /* Terminate communication on a socket */
         err = close(sockfd_s);
-        printf("5.\n");
+        //printf("5.\n");
         // ----------------------------------------------------------------------------------------------
         printf("Done\n");
         

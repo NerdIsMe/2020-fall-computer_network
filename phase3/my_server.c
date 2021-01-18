@@ -156,21 +156,21 @@ void Connection(void *client_sfd) // 與 client 連接成功後
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);// 要求 sender's certificate
     SSL_CTX_load_verify_locations(ctx, CA_LIST, NULL);
 
-    printf("1\n");
+    //printf("1\n");
     SSL *ssl = SSL_new(ctx);
     SSL_set_fd(ssl, client_info.socket);
-    printf("2\n");
+    //printf("2\n");
     /* Perform SSL Handshake on the SSL server */
     int err = SSL_accept(ssl);
     X509 *client_cert = SSL_get_peer_certificate(ssl);// get client cert
-    printf("3\n");
+    //printf("3\n");
     EVP_PKEY *client_public = X509_get_pubkey(client_cert);//get client public key
     //RSA *c_pub_rsa = EVP_PKEY_get1_RSA(client_public);
-    printf("4, user_index = %d\n", client_info.user_index);
+    //printf("4, user_index = %d\n", client_info.user_index);
     /*----------------------------------------------------------------------------------------*/
-    printf("before sending accept message.\n");
+    //printf("before sending accept message.\n");
     SSL_write(ssl, "Connection accepted!\n", MAX_LENGTH); // 送出連線成功
-    printf("sent accept message.\n");
+    //printf("sent accept message.\n");
     // the user status
     client_info.user_index = -1;
     while(true)
@@ -189,7 +189,7 @@ void Connection(void *client_sfd) // 與 client 連接成功後
         // Register
         else if(strstr(mesg_r, "REGISTER") != NULL)
         {
-            printf("1\n");
+            //printf("1\n");
             char *ptr, *username, *deposit;
             char delim[] = "#";
             ptr = strtok(mesg_r, delim);// word: REGISTER
@@ -227,20 +227,27 @@ void Connection(void *client_sfd) // 與 client 連接成功後
             {
                 //mesg_r 是 transaction
                 printf("receive client transactions: %s\n", mesg_r);
-                char cypher1[MAX256], cypher2[MAX256], plain11[MAX256], plain12[MAX256],
-                        plain21[MAX256], plain22[MAX256], o_plain[MAX256], delim_s[] = " ";
+                char cypher1[MAX256], cypher2[MAX256], plain1[MAX256], plain2[MAX256],
+                        o_plain[MAX256], delim_s[] = " ";
                 strcpy(o_plain, mesg_r);
-                char *sender_id = strtok(mesg_r, delim_s); printf("sender_id: %s", sender_id);RSA *senders_RSA = GetRSA(sender_id);
+                char *sender_id = strtok(mesg_r, delim_s); RSA *senders_RSA = GetRSA(sender_id);
                 
                 SSL_read(ssl, cypher1, MAX256); 
+                SSL_read(ssl, cypher2, MAX256);
                 //printf("cypher1 = %s\n", cypher1);
                 // for(int j = 0; j < MAX256; j++)
                 //     printf("%c\n", cypher1[j]);
-                err = RSA_public_decrypt(MAX256, cypher1, plain11, client_pbk[client_info.user_index], RSA_PKCS1_PADDING);
+                int err1 = RSA_public_decrypt(MAX256, cypher1, plain1, client_pbk[client_info.user_index], RSA_PKCS1_PADDING);
+                int err2 = RSA_public_decrypt(MAX256, cypher2, plain2, client_pbk[client_info.user_index], RSA_PKCS1_PADDING);
                 //RSA_public_decrypt(MAX256, plain11, plain12, senders_RSA, RSA_PKCS1_PADDING);
-                printf("err = %d, RSA size = %d\n", err, RSA_size(client_pbk[client_info.user_index]));
-                printf("plain1 = %s\n", plain11);
-                SSL_read(ssl, cypher2, MAX256);printf("cypher2 = %s\n", cypher2);
+                printf("err1 = %d, err2 = %d\n", err1, err2);
+                for(int i = 0; i < MAX256/2; i++)
+                    plain1[i+MAX256/2] = plain2[i];
+                int err3 = RSA_public_decrypt(MAX256, plain1, o_plain, senders_RSA, RSA_PKCS1_PADDING);
+                printf("err3 = %d\n", err3);
+                // printf("plain1 = %s\n", plain1);
+                // printf("plain2 = %s\n", plain2);
+                printf("plain text of cypher transaction = %s\n", o_plain);
             }
             else if(ptr == NULL)
                 SSL_write(ssl, "Invalid instructions\n", MAX_LENGTH);
