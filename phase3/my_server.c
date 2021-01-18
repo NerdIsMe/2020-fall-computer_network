@@ -226,12 +226,12 @@ void Connection(void *client_sfd) // 與 client 連接成功後
             if(strstr(mesg_r, "to you!") != NULL)
             {
                 //mesg_r 是 transaction
-                printf("receive client transactions: %s\n", mesg_r);
+                //printf("receive client transactions: %s\n", mesg_r);
                 char cypher1[MAX256], cypher2[MAX256], plain1[MAX256], plain2[MAX256],
-                        o_plain[MAX256], delim_s[] = " ";
-                strcpy(o_plain, mesg_r);
+                        o_plain[MAX256], t_mesg[MAX256], delim_s[] = " ";
+                strcpy(t_mesg, mesg_r);
                 char *sender_id = strtok(mesg_r, delim_s); RSA *senders_RSA = GetRSA(sender_id);
-                
+                char *cash_amount = strtok(NULL, delim_s); cash_amount = strtok(NULL, delim_s);
                 SSL_read(ssl, cypher1, MAX256); 
                 SSL_read(ssl, cypher2, MAX256);
                 //printf("cypher1 = %s\n", cypher1);
@@ -247,7 +247,19 @@ void Connection(void *client_sfd) // 與 client 連接成功後
                 printf("err3 = %d\n", err3);
                 // printf("plain1 = %s\n", plain1);
                 // printf("plain2 = %s\n", plain2);
-                printf("plain text of cypher transaction = %s\n", o_plain);
+                //printf("plain text of cypher transaction = %s\n", o_plain);
+                if(strcmp(o_plain, t_mesg) == 0)
+                {
+                    int add_cash = atoi(cash_amount);
+                    user_deposit[UserIndex(sender_id)] -= add_cash;
+                    user_deposit[client_info.user_index] += add_cash;
+                    printf("transaction verified!\n");
+                    SSL_write(ssl, "transaction verified!\n", MAX_LENGTH);
+
+                }
+                else
+                    SSL_write(ssl, "transaction failed!\n", MAX_LENGTH);
+
             }
             else if(ptr == NULL)
                 SSL_write(ssl, "Invalid instructions\n", MAX_LENGTH);

@@ -15,7 +15,7 @@ const int MAX_LENGTH = 100;
 #include <openssl/err.h>
 #define RSA_CLIENT_CERT     "key_cert/client2.crt"
 #define RSA_CLIENT_KEY      "key_cert/client2.key"
-#define CA_LIST    "key_cert/client1.crt"
+#define CA_LIST    "key_cert/CA_list.crt"
 SSL_CTX         *ctx;
 SSL             *ssl;
 const SSL_METHOD      *meth;
@@ -113,12 +113,8 @@ void *Listen(void* tempt)
         RSA_public_decrypt(MAX256, cypher_message, plain_message, sender_RSA, RSA_PKCS1_PADDING);
         //printf("6.4\n");
         // close SSL
-        SSL_shutdown(ssl_l);
-        SSL_free(ssl_l);
-        close(forClientSockfd);
-        //--------------------------------------------------------------------------------------
+        /*-------------------------------Interaction with server---------------------------------------*/
         //printf("cypher message: %s\n", cypher_message);
-        printf("Received message from other client: %s\n", plain_message);
         /*send message to server*/
         char half1_cypher[MAX256/2], half2_cypher[MAX256/2];
         char first_cypher[MAX256], second_cypher[MAX256], full_message[MAX256*3+1];
@@ -134,24 +130,26 @@ void *Listen(void* tempt)
                 //printf("half2: %c\n", half2_cypher[i-MAX256/2]);
             }
         }
-        //printf("half1_cypher = %s\n", first_cypher); printf("half2_cypher = %s\n", second_cypher);
-        //RSA_private_encrypt(MAX256, half1_cypher, first_cypher, rsa_private, RSA_PKCS1_PADDING);
-        //RSA_private_encrypt(MAX256, half1_cypher, second_cypher, rsa_private, RSA_PKCS1_PADDING);
+        //printf("7./n");
         int flen = (128+1) * sizeof(char);
         RSA_private_encrypt(flen, half1_cypher, first_cypher, rsa_private, RSA_PKCS1_PADDING);
         RSA_private_encrypt(flen, half2_cypher, second_cypher, rsa_private, RSA_PKCS1_PADDING);
-        //printf("f_cypher = %s\n", first_cypher); printf("s_cypher = %s\n", second_cypher);
-        //strcpy(full_message, plain_message); strcat(full_message, "&");
-        printf("9\n");
-        //strcat(full_message, first_cypher); strcat(full_message, second_cypher);
-        //printf("full message = %s\n", full_message);
 
         SSL_write(ssl, plain_message, MAX256);
         SSL_write(ssl, first_cypher, MAX256);
         SSL_write(ssl, second_cypher, MAX256);
         //SSL_read(ssl, cypher_message, MAX_LENGTH);
-        memset(plain_message, 0, MAX256); memset(cypher_message, 0, MAX256);
+        //printf("7./n");
+        char server_reply[MAX256];
+        SSL_read(ssl, server_reply, MAX256);
+        if(strstr(server_reply, "verified") != NULL)
+            printf("Received cash from other client: %s\n", plain_message);
 
+        SSL_write(ssl_l, server_reply, MAX256);
+        SSL_shutdown(ssl_l);
+        SSL_free(ssl_l);
+        close(forClientSockfd);
+        memset(plain_message, 0, MAX256); memset(cypher_message, 0, MAX256);
     }
 }
 
@@ -222,15 +220,17 @@ void *SendToOtherClient(void* message)
         int do_encrpt = RSA_private_encrypt(flen, message_to_c, cypher, rsa_private, RSA_PKCS1_PADDING);
         //printf("4.\n");
         err = SSL_write(ssl_s, cypher, MAX256);
+
+        char transaction_verify[MAX256];
+        SSL_read(ssl_s, transaction_verify,MAX256);
+        printf("%s", transaction_verify);
+        
         /*--------------- SSL closure ---------------*/
         /* Shutdown this side (server) of the connection. */
         err = SSL_shutdown(ssl_s);
-    
-        /* Terminate communication on a socket */
         err = close(sockfd_s);
         //printf("5.\n");
         // ----------------------------------------------------------------------------------------------
-        printf("Done\n");
         
     }
 }
@@ -399,7 +399,7 @@ int main(int argc , char *argv[])
         // }
         else // send request and SSL_read sslerver
         {
-            printf("input: %s", input);
+            //printf("input: %s", input);
             SSL_write(ssl, input, MAX_LENGTH);
             SSL_read(ssl, server_message, MAX_LENGTH);
             printf("%s----------\n", server_message);
