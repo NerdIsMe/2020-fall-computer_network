@@ -119,7 +119,37 @@ void *Listen(void* tempt)
         //--------------------------------------------------------------------------------------
         //printf("cypher message: %s\n", cypher_message);
         printf("Received message from other client: %s\n", plain_message);
-        SSL_write(ssl, plain_message, MAX_LENGTH);
+        /*send message to server*/
+        char half1_cypher[MAX256/2], half2_cypher[MAX256/2];
+        char first_cypher[MAX256], second_cypher[MAX256], full_message[MAX256*3+1];
+        //printf("cypher message = %s\n", cypher_message);
+        for(int i = 0; i<MAX256; i++)
+        {
+            //printf("i = %d, s = %c\n", i, cypher_message[i]);
+            if(i<MAX256/2)
+                half1_cypher[i] = (cypher_message[i]);
+            else
+            {
+                half2_cypher[i-MAX256/2] = cypher_message[i];
+                //printf("half2: %c\n", half2_cypher[i-MAX256/2]);
+            }
+        }
+        //memcpy(half1_cypher, cypher_message, MAX256/2); memcpy(half2_cypher, cypher_message + MAX256/2, MAX256/2);
+        //printf("half1_cypher = %s\n", first_cypher); printf("half2_cypher = %s\n", second_cypher);
+        //RSA_private_encrypt(MAX256, half1_cypher, first_cypher, rsa_private, RSA_PKCS1_PADDING);
+        //RSA_private_encrypt(MAX256, half2_cypher, second_cypher, rsa_private, RSA_PKCS1_PADDING);
+        int flen = (strlen(plain_message)+1) * sizeof(char);
+        RSA_private_encrypt(flen, plain_message, first_cypher, rsa_private, RSA_PKCS1_PADDING);
+        RSA_private_encrypt(flen, plain_message, second_cypher, rsa_private, RSA_PKCS1_PADDING);
+        //printf("f_cypher = %s\n", first_cypher); printf("s_cypher = %s\n", second_cypher);
+        strcpy(full_message, plain_message); strcat(full_message, "&");
+        printf("9\n");
+        strcat(full_message, first_cypher); strcat(full_message, second_cypher);
+        //printf("full message = %s\n", full_message);
+
+        SSL_write(ssl, plain_message, MAX256);
+        SSL_write(ssl, first_cypher, MAX256);
+        SSL_write(ssl, plain_message, MAX256);
         //SSL_read(ssl, cypher_message, MAX_LENGTH);
         memset(plain_message, 0, MAX256); memset(cypher_message, 0, MAX256);
 
@@ -192,7 +222,6 @@ void *SendToOtherClient(void* message)
         int flen = (strlen(message_to_c)+1) * sizeof(char);
         int do_encrpt = RSA_private_encrypt(flen, message_to_c, cypher, rsa_private, RSA_PKCS1_PADDING);
         printf("4.\n");
-        printf("cpher len = %lu\n", strlen(cypher));
         err = SSL_write(ssl_s, cypher, MAX256);
         /*--------------- SSL closure ---------------*/
         /* Shutdown this side (server) of the connection. */
@@ -310,10 +339,11 @@ int main(int argc , char *argv[])
             else // transaction
             {
                 //port 是 amount of cash, ptr_ 是對方的account
+                char* account_balance;
                 SSL_write(ssl, "List", MAX_LENGTH);
                 SSL_read(ssl, server_message, MAX_LENGTH);
                 char *tptr, *to_IPaddr = NULL, *to_port, *to_user_name; char crlf[] = "\n";
-                tptr = strtok(server_message, crlf); //account balance
+                tptr = strtok(server_message, crlf); account_balance = tptr;//account balance
                 tptr = strtok(NULL, crlf); // # of users online
                 printf("Number of users online = %s\n", tptr);
                 if(atoi(tptr) == 1)
@@ -324,6 +354,16 @@ int main(int argc , char *argv[])
                     //tptr = strtok(NULL, crlf);
                     while(tptr != NULL)
                     {
+                        if(strcmp(ptr_, self_name) == 0)
+                        {
+                            printf("No transaction to yourself!\n");
+                            break;
+                        }
+                        if(atoi(port) > atoi(account_balance))
+                        {
+                            printf("Don't have enough deposit!\n");
+                            break;
+                        }
                         //printf("message: %s.\n", tptr);
                         tptr = strtok(NULL, delim); to_user_name = tptr; // user account;
                         //printf("%s.\n", tptr);
@@ -331,9 +371,12 @@ int main(int argc , char *argv[])
                         tptr = strtok(NULL, crlf); to_port = tptr;// port number
                         //printf("%s.\n", to_user_name);
                         //printf("0.2\n");
-                        if(strcmp(ptr_, to_user_name) == 0)
+                        if(to_user_name == NULL){
+                            printf("User not exist!\n");
+                            break;
+                        }
+                        else if(strcmp(ptr_, to_user_name) == 0)
                         {
-                            //printf("0.3\n");
                             struct to_info send_message;
                             send_message.IP = to_IPaddr;
                             send_message.port_num = to_port;

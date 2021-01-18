@@ -24,10 +24,10 @@
 #define CA_LIST    "key_cert/CA_list.crt"
 #define MAX256 256
 
-SSL_CTX         *ctx;
+//SSL_CTX         *ctx;
 //SSL             *ssl;
 const SSL_METHOD      *meth;
-X509            *client_cert = NULL;
+//X509            *client_cert = NULL;
 // --------------------------
 
 const int MAX_LENGTH = 100;
@@ -48,6 +48,7 @@ bool *user_status;
 int *user_deposit;
 int num_of_users = 0;
 int num_of_users_online = 0;
+RSA **client_pbk;
 
 char* itoa(int val, int base)
 {
@@ -62,6 +63,15 @@ char* itoa(int val, int base)
 	
 	return &buf[i+1];
 	
+}
+
+RSA* GetRSA(char* name)
+{
+    for(int i = 0; i < 100; i++)
+    {
+        if(strcmp(user_name[i], name) == 0)
+            return client_pbk[i];
+    }
 }
 
 int CountHash(char *mesg)
@@ -118,9 +128,34 @@ void Connection(void *client_sfd) // 與 client 連接成功後
 {
     //int client_sockfd = (intptr_t) client_sfd;
     struct client_information client_info = *((struct client_information *)client_sfd);
-    char mesg_r[MAX256];
+    char mesg_r[MAX256*3+1], mesg_ver[MAX256*3+1];
     
     /*phase 3 SSL*/
+    SSL_CTX         *ctx = SSL_CTX_new(meth);
+
+    /* Load the client certificate into the SSL_CTX structure */
+    if (SSL_CTX_use_certificate_file(ctx, RSA_SERVER_CERT, SSL_FILETYPE_PEM) <= 0)
+    {
+        ERR_print_errors_fp(stderr);
+        exit(1);
+    }
+
+    /* Load the private-key corresponding to the client certificate */
+    if (SSL_CTX_use_PrivateKey_file(ctx, RSA_SERVER_KEY, SSL_FILETYPE_PEM) <= 0)
+    {
+        ERR_print_errors_fp(stderr);
+        exit(1);
+    }
+
+    /* Check if the client certificate and private-key matches */
+    if (!SSL_CTX_check_private_key(ctx))
+    {
+        fprintf(stderr, "Private key does not match the certificate public key\n ");
+        exit(1);
+    }
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);// 要求 sender's certificate
+    SSL_CTX_load_verify_locations(ctx, CA_LIST, NULL);
+
     printf("1\n");
     SSL *ssl = SSL_new(ctx);
     SSL_set_fd(ssl, client_info.socket);
@@ -130,8 +165,8 @@ void Connection(void *client_sfd) // 與 client 連接成功後
     X509 *client_cert = SSL_get_peer_certificate(ssl);// get client cert
     printf("3\n");
     EVP_PKEY *client_public = X509_get_pubkey(client_cert);//get client public key
-    printf("4\n");
-    RSA *client_RSA = EVP_PKEY_get1_RSA(client_public);//RSA
+    //RSA *c_pub_rsa = EVP_PKEY_get1_RSA(client_public);
+    printf("4, user_index = %d\n", client_info.user_index);
     /*----------------------------------------------------------------------------------------*/
     printf("before sending accept message.\n");
     SSL_write(ssl, "Connection accepted!\n", MAX_LENGTH); // 送出連線成功
@@ -140,7 +175,8 @@ void Connection(void *client_sfd) // 與 client 連接成功後
     client_info.user_index = -1;
     while(true)
     {
-        SSL_read(ssl, mesg_r, MAX256);
+        SSL_read(ssl, mesg_ver, MAX256);
+        strcpy(mesg_r, mesg_ver);
         printf("%s\n", mesg_r);
         // Exit
         if(strcmp(mesg_r, "Exit") == 0)
@@ -163,6 +199,7 @@ void Connection(void *client_sfd) // 與 client 連接成功後
             user_deposit[num_of_users] = atoi(deposit);
             user_status[num_of_users] = false;
             strcpy(user_IP[num_of_users], client_info.IP_address);
+            client_pbk[num_of_users] = EVP_PKEY_get1_RSA(client_public);//RSA public key
             num_of_users += 1;
             SSL_write(ssl, "100 OK\n", MAX_LENGTH);// 成功的話
         }
@@ -187,7 +224,24 @@ void Connection(void *client_sfd) // 與 client 連接成功後
             ptr = strtok(mesg_r, delim); ptr1 = ptr;
             ptr = strtok(NULL, delim);
             if(strstr(mesg_r, "to you!") != NULL)
+            {
+                //mesg_r 是 transaction
                 printf("receive client transactions: %s\n", mesg_r);
+                char cypher1[MAX256], cypher2[MAX256], plain11[MAX256], plain12[MAX256],
+                        plain21[MAX256], plain22[MAX256], o_plain[MAX256], delim_s[] = " ";
+                strcpy(o_plain, mesg_r);
+                char *sender_id = strtok(mesg_r, delim_s); printf("sender_id: %s", sender_id);RSA *senders_RSA = GetRSA(sender_id);
+                
+                SSL_read(ssl, cypher1, MAX256); 
+                //printf("cypher1 = %s\n", cypher1);
+                // for(int j = 0; j < MAX256; j++)
+                //     printf("%c\n", cypher1[j]);
+                err = RSA_public_decrypt(MAX256, cypher1, plain11, client_pbk[client_info.user_index], RSA_PKCS1_PADDING);
+                //RSA_public_decrypt(MAX256, plain11, plain12, senders_RSA, RSA_PKCS1_PADDING);
+                printf("err = %d, RSA size = %d\n", err, RSA_size(client_pbk[client_info.user_index]));
+                printf("plain1 = %s\n", plain11);
+                SSL_read(ssl, cypher2, MAX256);printf("cypher2 = %s\n", cypher2);
+            }
             else if(ptr == NULL)
                 SSL_write(ssl, "Invalid instructions\n", MAX_LENGTH);
             else
@@ -214,6 +268,7 @@ void Connection(void *client_sfd) // 與 client 連接成功後
         }
 
         memset(mesg_r, 0, MAX_LENGTH);
+        memset(mesg_ver, 0, MAX_LENGTH);
     }
     close(client_info.socket);
     SSL_shutdown(ssl);
@@ -227,30 +282,9 @@ int main(int argc, char *argv[])
     SSL_library_init(); /* load encryption & hash algorithms for SSL */         	
     SSL_load_error_strings(); /* load the error strings for good error reporting */
     meth = SSLv23_method();
-    ctx = SSL_CTX_new(meth);
 
-    /* Load the client certificate into the SSL_CTX structure */
-    if (SSL_CTX_use_certificate_file(ctx, RSA_SERVER_CERT, SSL_FILETYPE_PEM) <= 0)
-    {
-        ERR_print_errors_fp(stderr);
-        exit(1);
-    }
 
-    /* Load the private-key corresponding to the client certificate */
-    if (SSL_CTX_use_PrivateKey_file(ctx, RSA_SERVER_KEY, SSL_FILETYPE_PEM) <= 0)
-    {
-        ERR_print_errors_fp(stderr);
-        exit(1);
-    }
-
-    /* Check if the client certificate and private-key matches */
-    if (!SSL_CTX_check_private_key(ctx))
-    {
-        fprintf(stderr, "Private key does not match the certificate public key\n ");
-        exit(1);
-    }
-    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);// 要求 sender's certificate
-    SSL_CTX_load_verify_locations(ctx, CA_LIST, NULL);
+    client_pbk = malloc(100 * sizeof(RSA*)); 
     /*--------------------------------------------------------------------------------*/
     // allocate memory to save user name and status
     //user_name = calloc(MAX_LENGTH, sizeof(char[20]));
